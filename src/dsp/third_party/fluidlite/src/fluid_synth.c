@@ -2428,9 +2428,27 @@ fluid_synth_free_voice_by_kill(fluid_synth_t* synth)
      * This is a number between roughly 0 and 100.*/
     this_voice_prio -= (synth->noteid - fluid_voice_get_id(voice));
 
-    /* take a rough estimate of loudness into account. Louder voices are more important. */
-    if (voice->volenv_section != FLUID_VOICE_ENVATTACK){
+    /* take a rough estimate of loudness into account. Louder voices are more important.
+     *
+     * schwung-sf2: a voice still in its DELAY or ATTACK stage was just
+     * started and is about to be at full level, so it counts as loudest --
+     * not as silent. It used to add nothing here (volenv_val is 0 before the
+     * first render), which made the newest voices the LEAST important of all:
+     * with every voice busy, a burst of note-ons (a downbeat's kick and crash,
+     * each two stereo voices) stole its own just-started voices one after
+     * another and only the last survived. */
+    if (voice->volenv_section == FLUID_VOICE_ENVDELAY ||
+        voice->volenv_section == FLUID_VOICE_ENVATTACK) {
+      this_voice_prio += 1000.;
+    } else {
       this_voice_prio += voice->volenv_val * 1000.;
+    }
+
+    /* schwung-sf2: a voice already in its RELEASE stage is fading out, even
+     * when _RELEASED() does not say so (a drum kit's long release keeps hits
+     * in that stage for seconds). Prefer it to anything still sounding. */
+    if (voice->volenv_section == FLUID_VOICE_ENVRELEASE && !_RELEASED(voice)) {
+      this_voice_prio -= 2000.;
     }
 
     /* check if this voice has less priority than the previous candidate. */
