@@ -428,6 +428,7 @@ new_fluid_synth(fluid_settings_t *settings)
   synth->state = FLUID_SYNTH_PLAYING;
   synth->sfont = NULL;
   synth->noteid = 0;
+  synth->note_limit = 0;
   synth->ticks = 0;
   synth->tuning = NULL;
 
@@ -779,6 +780,11 @@ fluid_synth_noteon(fluid_synth_t* synth, int chan, int key, int vel)
   /* If there is another voice process on the same channel and key,
      advance it to the release phase. */
   fluid_synth_release_voice_on_same_note(synth, chan, key);
+
+  /* schwung-sf2: make room for this note under the note limit */
+  if (synth->note_limit > 0) {
+    fluid_synth_drop_oldest_notes(synth, synth->note_limit - 1);
+  }
 
   return fluid_synth_start(synth, synth->noteid++, channel->preset, 0, chan, key, vel);
 }
@@ -3007,6 +3013,80 @@ void fluid_synth_release_voice_on_same_note(fluid_synth_t* synth, int chan, int 
       fluid_voice_noteoff(voice);
     }
   }
+}
+
+/*
+ * schwung-sf2: the note limit.
+ *
+ * Counts notes, not voices: every voice one note-on starts (a stereo
+ * sample's left and right, a preset's layers) shares that note's id. A
+ * note sounds while any of its voices plays, release tail included, and
+ * stops counting once it has been dropped and is only fading out.
+ */
+static int
+fluid_synth_count_sounding_notes(fluid_synth_t* synth, unsigned int* oldest_id)
+{
+  int i, j, count = 0;
+  unsigned int id, age, oldest_age = 0;
+  fluid_voice_t* voice;
+  fluid_voice_t* other;
+
+  for (i = 0; i < synth->polyphony; i++) {
+    voice = synth->voice[i];
+    if (!_PLAYING(voice) || voice->dropped) continue;
+    id = fluid_voice_get_id(voice);
+
+    /* count each note once, at its first voice */
+    for (j = 0; j < i; j++) {
+      other = synth->voice[j];
+      if (_PLAYING(other) && !other->dropped && fluid_voice_get_id(other) == id) break;
+    }
+    if (j < i) continue;
+
+    /* ids count up from noteid's past values, so age survives wrapping */
+    age = synth->noteid - id;
+    if (count == 0 || age > oldest_age) {
+      oldest_age = age;
+      *oldest_id = id;
+    }
+    count++;
+  }
+  return count;
+}
+
+/* Drop the oldest notes until at most `keep` are sounding. */
+void
+fluid_synth_drop_oldest_notes(fluid_synth_t* synth, int keep)
+{
+  int i;
+  unsigned int oldest_id = 0;
+  fluid_voice_t* voice;
+
+  while (fluid_synth_count_sounding_notes(synth, &oldest_id) > keep) {
+    for (i = 0; i < synth->polyphony; i++) {
+      voice = synth->voice[i];
+      if (_PLAYING(voice) && !voice->dropped && fluid_voice_get_id(voice) == oldest_id) {
+        fluid_voice_drop(voice);
+      }
+    }
+  }
+}
+
+int
+fluid_synth_set_note_limit(fluid_synth_t* synth, int limit)
+{
+  if (limit < 0) limit = 0;
+  synth->note_limit = limit;
+  if (limit > 0) {
+    fluid_synth_drop_oldest_notes(synth, limit);
+  }
+  return FLUID_OK;
+}
+
+int
+fluid_synth_get_note_limit(fluid_synth_t* synth)
+{
+  return synth->note_limit;
 }
 
 /* Purpose:

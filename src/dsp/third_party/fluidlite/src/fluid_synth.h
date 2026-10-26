@@ -117,6 +117,7 @@ struct _fluid_synth_t
   int active_voice_count;             /**< count of active voices */
   unsigned int noteid;                /** the id is incremented for every new note. it's used for noteoff's  */
   unsigned int storeid;
+  int note_limit;                     /** schwung-sf2: max sounding notes, oldest dropped first; 0 = none */
   int nbuf;                           /** How many audio buffers are used? (depends on nr of audio channels / groups)*/
 
   fluid_real_t** left_buf;
@@ -193,6 +194,7 @@ void fluid_synth_update_presets(fluid_synth_t* synth);
 
 int fluid_synth_update_gain(fluid_synth_t* synth, char* name, double value);
 int fluid_synth_update_polyphony(fluid_synth_t* synth, char* name, int value);
+void fluid_synth_drop_oldest_notes(fluid_synth_t* synth, int keep);
 
 fluid_bank_offset_t* fluid_synth_get_bank_offset0(fluid_synth_t* synth, int sfont_id);
 void fluid_synth_remove_bank_offset(fluid_synth_t* synth, int sfont_id);

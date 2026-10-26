@@ -393,6 +393,12 @@ FLUIDSYNTH_API int fluid_synth_get_polyphony(fluid_synth_t* synth);
 
 FLUIDSYNTH_API int fluid_synth_get_active_voice_count(fluid_synth_t* synth);
 
+  /** schwung-sf2: limit how many notes sound at once (0 = no limit). A
+      note-on beyond the limit fades out the oldest note, release tail or
+      not. Each note-on is one note however many voices it starts. */
+FLUIDSYNTH_API int fluid_synth_set_note_limit(fluid_synth_t* synth, int limit);
+FLUIDSYNTH_API int fluid_synth_get_note_limit(fluid_synth_t* synth);
+
   /** Get the internal buffer size. The internal buffer size if not the
       same thing as the buffer size specified in the
       settings. Internally, the synth *always* uses a specific buffer

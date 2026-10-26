@@ -53,6 +53,7 @@ static const host_api_v1_t *g_host = NULL;
 /* Constants */
 #define MAX_SOUNDFONTS 2048
 #define MAX_PRESETS 1024
+#define MAX_VOICES 64    /* note limit ceiling; also FluidLite's voice pool */
 
 typedef struct {
     char path[512];
@@ -74,6 +75,7 @@ typedef struct {
     int preset_count;
     int octave_transpose;
     float gain;
+    int voices;               /* notes sounding at once; oldest dropped first */
     char soundfont_path[512];
     char soundfont_name[128];
     char preset_name[128];
@@ -344,6 +346,15 @@ static void select_preset(sf2_instance_t *inst, int index) {
     plugin_log(msg);
 }
 
+static void set_voices(sf2_instance_t *inst, int voices) {
+    if (voices < 1) voices = 1;
+    if (voices > MAX_VOICES) voices = MAX_VOICES;
+    inst->voices = voices;
+    if (inst->synth) {
+        fluid_synth_set_note_limit(inst->synth, voices);
+    }
+}
+
 /* V2 API Implementation */
 
 static void* v2_create_instance(const char *module_dir, const char *json_defaults) {
@@ -372,8 +383,9 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
 
     fluid_settings_setnum(inst->settings, "synth.sample-rate", (double)sample_rate);
     fluid_settings_setnum(inst->settings, "synth.gain", 1.0);
-    fluid_settings_setint(inst->settings, "synth.polyphony", 64);
+    fluid_settings_setint(inst->settings, "synth.polyphony", MAX_VOICES);
     inst->gain = 1.0f;
+    inst->voices = MAX_VOICES;
     inst->reverb_on = 1;
     inst->chorus_on = 1;
     inst->reverb_level = FLUID_REVERB_DEFAULT_LEVEL;
@@ -400,6 +412,8 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
     /* Also log to stderr for debugging */
     fprintf(stderr, "[sf2] %s\n", rate_msg);
     fflush(stderr);
+
+    fluid_synth_set_note_limit(inst->synth, inst->voices);
 
     /* Set 4th order interpolation for better pitch accuracy (-1 = all channels) */
     fluid_synth_set_interp_method(inst->synth, -1, FLUID_INTERP_4THORDER);
@@ -572,6 +586,8 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         if (inst->synth) {
             fluid_synth_set_gain(inst->synth, inst->gain);
         }
+    } else if (strcmp(key, "voices") == 0) {
+        set_voices(inst, atoi(val));
     } else if (strcmp(key, "reverb_on") == 0) {
         inst->reverb_on = atoi(val) ? 1 : 0;
         if (inst->synth) {
@@ -643,6 +659,9 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
                 fluid_synth_set_gain(inst->synth, inst->gain);
             }
         }
+        if (json_get_number(val, "voices", &f) == 0) {
+            set_voices(inst, (int)f);
+        }
         if (json_get_number(val, "reverb_on", &f) == 0) {
             inst->reverb_on = (int)f ? 1 : 0;
             if (inst->synth) {
@@ -713,6 +732,8 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "%d", inst->octave_transpose);
     } else if (strcmp(key, "gain") == 0) {
         return snprintf(buf, buf_len, "%.2f", inst->gain);
+    } else if (strcmp(key, "voices") == 0) {
+        return snprintf(buf, buf_len, "%d", inst->voices);
     } else if (strcmp(key, "reverb_on") == 0) {
         return snprintf(buf, buf_len, "%d", inst->reverb_on);
     } else if (strcmp(key, "chorus_on") == 0) {
@@ -756,9 +777,9 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         }
         return snprintf(buf, buf_len,
             "{\"soundfont_name\":\"%s\",\"soundfont_index\":%d,\"preset\":%d,\"octave_transpose\":%d,\"gain\":%.2f,"
-            "\"reverb_on\":%d,\"chorus_on\":%d,\"reverb_level\":%.2f,\"chorus_level\":%.2f}",
+            "\"voices\":%d,\"reverb_on\":%d,\"chorus_on\":%d,\"reverb_level\":%.2f,\"chorus_level\":%.2f}",
             sf_name, inst->soundfont_index, inst->current_preset, inst->octave_transpose, inst->gain,
-            inst->reverb_on, inst->chorus_on, inst->reverb_level, inst->chorus_level);
+            inst->voices, inst->reverb_on, inst->chorus_on, inst->reverb_level, inst->chorus_level);
     }
     /* UI hierarchy for shadow parameter editor */
     else if (strcmp(key, "ui_hierarchy") == 0) {
@@ -775,6 +796,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                     "\"params\":["
                         "{\"key\":\"octave_transpose\",\"label\":\"Octave\"},"
                         "{\"key\":\"gain\",\"label\":\"Gain\"},"
+                        "{\"key\":\"voices\",\"label\":\"Voices\",\"type\":\"int\",\"min\":1,\"max\":64,\"default\":64,\"step\":1},"
                         "{\"key\":\"reverb_on\",\"label\":\"Built-in Reverb\",\"type\":\"toggle\"},"
                         "{\"key\":\"reverb_level\",\"short_name\":\"reverb\",\"label\":\"Reverb Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},"
                         "{\"key\":\"chorus_on\",\"label\":\"Built-in Chorus\",\"type\":\"toggle\"},"

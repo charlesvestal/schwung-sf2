@@ -108,6 +108,7 @@ struct _fluid_voice_t
 	unsigned int start_time;
 	unsigned int ticks;
     unsigned int noteoff_ticks;      /* Delay note-off until this tick */
+	unsigned char dropped;           /* schwung-sf2: fading out to make room under the note limit */
 
 	fluid_real_t amp;                /* current linear amplitude */
 	fluid_phase_t phase;             /* the phase of the sample wave */
@@ -250,6 +251,7 @@ fluid_channel_t* fluid_voice_get_channel(fluid_voice_t* voice);
 int calculate_hold_decay_buffers(fluid_voice_t* voice, int gen_base,
 				 int gen_key2base, int is_decay);
 int fluid_voice_kill_excl(fluid_voice_t* voice);
+int fluid_voice_drop(fluid_voice_t* voice);
 fluid_real_t fluid_voice_get_lower_boundary_for_attenuation(fluid_voice_t* voice);
 fluid_real_t fluid_voice_determine_amplitude_that_reaches_noise_floor_for_sample(fluid_voice_t* voice);
 void fluid_voice_check_sample_sanity(fluid_voice_t* voice);

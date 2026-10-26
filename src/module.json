@@ -45,6 +45,14 @@
               "min": 0,
               "max": 2,
               "default": 1.0
+            },
+            {
+              "key": "voices",
+              "label": "Voices",
+              "type": "int",
+              "min": 1,
+              "max": 64,
+              "default": 64
             }
           ],
           "knobs": [

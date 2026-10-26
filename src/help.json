@@ -8,7 +8,8 @@
         "synthesizer using",
         "FluidLite engine.",
         "",
-        "64-voice polyphony.",
+        "Up to 64 notes at",
+        "once (see Voices).",
         "",
         "Plays presets from",
         ".sf2 files via MIDI.",
@@ -101,6 +102,30 @@
             " 0.0 (silent) to",
             " 2.0 (double volume)",
             " Default: 1.0"
+          ]
+        },
+        {
+          "title": "Voices",
+          "lines": [
+            "In the menu:",
+            " Voices, 1 to 64.",
+            " Default 64.",
+            "",
+            "How many notes can",
+            "sound at once. A new",
+            "note past the limit",
+            "fades out the oldest",
+            "note, even one only",
+            "ringing in its",
+            "release tail.",
+            "",
+            "1 = mono: each note",
+            "cuts off the last.",
+            "",
+            "Counts notes, not",
+            "samples: a stereo or",
+            "layered sound is",
+            "still one note."
           ]
         },
         {
