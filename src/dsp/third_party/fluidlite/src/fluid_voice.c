@@ -44,6 +44,7 @@
 
 /* min vol envelope release (to stop clicks) in SoundFont timecents */
 #define FLUID_MIN_VOLENVRELEASE -7200.0f /* ~16ms */
+#define FLUID_DROP_VOLENVRELEASE -6000.0f /* schwung-sf2: ~31ms fade for a dropped note */
 
 //removed inline
 static void fluid_voice_effects (fluid_voice_t *voice, int count,
@@ -141,6 +142,7 @@ fluid_voice_init(fluid_voice_t* voice, fluid_sample_t* sample,
   voice->start_time = start_time;
   voice->ticks = 0;
   voice->noteoff_ticks = 0;
+  voice->dropped = 0;
   voice->debug = 0;
   voice->has_looped = 0; /* Will be set during voice_write when the 2nd loop point is reached */
   voice->last_fres = -1; /* The filter coefficients have to be calculated later in the DSP loop. */
@@ -1611,6 +1613,49 @@ fluid_voice_kill_excl(fluid_voice_t* voice){
 
   /* Speed up the modulation envelope */
   fluid_voice_gen_set(voice, GEN_MODENVRELEASE, -200);
+  fluid_voice_update_param(voice, GEN_MODENVRELEASE);
+
+  return FLUID_OK;
+}
+
+/*
+ * fluid_voice_drop
+ *
+ * schwung-sf2: the synth's note limit is full and this voice belongs to
+ * the oldest note. Fade it out quickly, whatever stage it is in -- unlike
+ * fluid_voice_kill_excl, also when it is already releasing, since a long
+ * release tail is exactly what keeps an old note sounding. The short fade
+ * avoids the click of fluid_voice_off.
+ */
+int
+fluid_voice_drop(fluid_voice_t* voice)
+{
+  if (!_PLAYING(voice)) {
+    return FLUID_OK;
+  }
+
+  voice->dropped = 1;
+  voice->status = FLUID_VOICE_ON;  /* no longer held by the sustain pedal */
+  voice->noteoff_ticks = 0;        /* nor by a pending delayed note-off */
+
+  /* The attack ramps linearly in amplitude, the release in dB: carry the
+   * level across as fluid_voice_noteoff does. */
+  if (voice->volenv_section == FLUID_VOICE_ENVATTACK && voice->volenv_val > 0) {
+    fluid_real_t lfo = voice->modlfo_val * -voice->modlfo_to_vol;
+    fluid_real_t amp = voice->volenv_val * pow (10.0, lfo / -200);
+    fluid_real_t env_value = - ((-200 * log (amp) / log (10.0) - lfo) / 960.0 - 1);
+    fluid_clip (env_value, 0.0, 1.0);
+    voice->volenv_val = env_value;
+  }
+
+  voice->volenv_section = FLUID_VOICE_ENVRELEASE;
+  voice->volenv_count = 0;
+  voice->modenv_section = FLUID_VOICE_ENVRELEASE;
+  voice->modenv_count = 0;
+
+  fluid_voice_gen_set(voice, GEN_VOLENVRELEASE, FLUID_DROP_VOLENVRELEASE);
+  fluid_voice_update_param(voice, GEN_VOLENVRELEASE);
+  fluid_voice_gen_set(voice, GEN_MODENVRELEASE, FLUID_DROP_VOLENVRELEASE);
   fluid_voice_update_param(voice, GEN_MODENVRELEASE);
 
   return FLUID_OK;

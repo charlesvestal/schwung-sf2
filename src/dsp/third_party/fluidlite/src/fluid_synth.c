@@ -428,6 +428,7 @@ new_fluid_synth(fluid_settings_t *settings)
   synth->state = FLUID_SYNTH_PLAYING;
   synth->sfont = NULL;
   synth->noteid = 0;
+  synth->note_limit = 0;
   synth->ticks = 0;
   synth->tuning = NULL;
 
@@ -779,6 +780,11 @@ fluid_synth_noteon(fluid_synth_t* synth, int chan, int key, int vel)
   /* If there is another voice process on the same channel and key,
      advance it to the release phase. */
   fluid_synth_release_voice_on_same_note(synth, chan, key);
+
+  /* schwung-sf2: make room for this note under the note limit */
+  if (synth->note_limit > 0) {
+    fluid_synth_drop_oldest_notes(synth, synth->note_limit - 1);
+  }
 
   return fluid_synth_start(synth, synth->noteid++, channel->preset, 0, chan, key, vel);
 }
@@ -2428,9 +2434,27 @@ fluid_synth_free_voice_by_kill(fluid_synth_t* synth)
      * This is a number between roughly 0 and 100.*/
     this_voice_prio -= (synth->noteid - fluid_voice_get_id(voice));
 
-    /* take a rough estimate of loudness into account. Louder voices are more important. */
-    if (voice->volenv_section != FLUID_VOICE_ENVATTACK){
+    /* take a rough estimate of loudness into account. Louder voices are more important.
+     *
+     * schwung-sf2: a voice still in its DELAY or ATTACK stage was just
+     * started and is about to be at full level, so it counts as loudest --
+     * not as silent. It used to add nothing here (volenv_val is 0 before the
+     * first render), which made the newest voices the LEAST important of all:
+     * with every voice busy, a burst of note-ons (a downbeat's kick and crash,
+     * each two stereo voices) stole its own just-started voices one after
+     * another and only the last survived. */
+    if (voice->volenv_section == FLUID_VOICE_ENVDELAY ||
+        voice->volenv_section == FLUID_VOICE_ENVATTACK) {
+      this_voice_prio += 1000.;
+    } else {
       this_voice_prio += voice->volenv_val * 1000.;
+    }
+
+    /* schwung-sf2: a voice already in its RELEASE stage is fading out, even
+     * when _RELEASED() does not say so (a drum kit's long release keeps hits
+     * in that stage for seconds). Prefer it to anything still sounding. */
+    if (voice->volenv_section == FLUID_VOICE_ENVRELEASE && !_RELEASED(voice)) {
+      this_voice_prio -= 2000.;
     }
 
     /* check if this voice has less priority than the previous candidate. */
@@ -2989,6 +3013,80 @@ void fluid_synth_release_voice_on_same_note(fluid_synth_t* synth, int chan, int 
       fluid_voice_noteoff(voice);
     }
   }
+}
+
+/*
+ * schwung-sf2: the note limit.
+ *
+ * Counts notes, not voices: every voice one note-on starts (a stereo
+ * sample's left and right, a preset's layers) shares that note's id. A
+ * note sounds while any of its voices plays, release tail included, and
+ * stops counting once it has been dropped and is only fading out.
+ */
+static int
+fluid_synth_count_sounding_notes(fluid_synth_t* synth, unsigned int* oldest_id)
+{
+  int i, j, count = 0;
+  unsigned int id, age, oldest_age = 0;
+  fluid_voice_t* voice;
+  fluid_voice_t* other;
+
+  for (i = 0; i < synth->polyphony; i++) {
+    voice = synth->voice[i];
+    if (!_PLAYING(voice) || voice->dropped) continue;
+    id = fluid_voice_get_id(voice);
+
+    /* count each note once, at its first voice */
+    for (j = 0; j < i; j++) {
+      other = synth->voice[j];
+      if (_PLAYING(other) && !other->dropped && fluid_voice_get_id(other) == id) break;
+    }
+    if (j < i) continue;
+
+    /* ids count up from noteid's past values, so age survives wrapping */
+    age = synth->noteid - id;
+    if (count == 0 || age > oldest_age) {
+      oldest_age = age;
+      *oldest_id = id;
+    }
+    count++;
+  }
+  return count;
+}
+
+/* Drop the oldest notes until at most `keep` are sounding. */
+void
+fluid_synth_drop_oldest_notes(fluid_synth_t* synth, int keep)
+{
+  int i;
+  unsigned int oldest_id = 0;
+  fluid_voice_t* voice;
+
+  while (fluid_synth_count_sounding_notes(synth, &oldest_id) > keep) {
+    for (i = 0; i < synth->polyphony; i++) {
+      voice = synth->voice[i];
+      if (_PLAYING(voice) && !voice->dropped && fluid_voice_get_id(voice) == oldest_id) {
+        fluid_voice_drop(voice);
+      }
+    }
+  }
+}
+
+int
+fluid_synth_set_note_limit(fluid_synth_t* synth, int limit)
+{
+  if (limit < 0) limit = 0;
+  synth->note_limit = limit;
+  if (limit > 0) {
+    fluid_synth_drop_oldest_notes(synth, limit);
+  }
+  return FLUID_OK;
+}
+
+int
+fluid_synth_get_note_limit(fluid_synth_t* synth)
+{
+  return synth->note_limit;
 }
 
 /* Purpose:
